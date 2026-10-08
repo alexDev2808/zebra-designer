@@ -1,0 +1,19 @@
+# Entorno de Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Empaquetado con PyInstaller
+build/
+dist/
+*.spec
+
+# Archivos generados por el usuario
+*.zpl
+~$*.xlsx
+
+# Editores / sistema
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
