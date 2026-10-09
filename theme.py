@@ -23,7 +23,13 @@ C = {
     "canvas": "#DDE3F0",
     "ruler": "#8C97B0",
     "danger": "#C62828",
+    # niveles de la comprobación de impresora
+    "ok": "#2E7D32",
+    "info": "#1A3FA6",
+    "warn": "#B26A00",
+    "error": "#C62828",
 }
+LEVEL_ICON = {"ok": "✔", "info": "ℹ", "warn": "⚠", "error": "✖"}
 
 FONT = "Segoe UI"
 F_BASE = (FONT, 10)
@@ -143,6 +149,15 @@ def apply(root: tk.Tk, f: float = 1.0) -> ttk.Style:
                  relief="flat", padding=(8, 6), bordercolor=C["primary_pressed"],
                  lightcolor=C["primary"], darkcolor=C["primary"])
     st.map("Treeview.Heading", background=[("active", C["primary_hover"])])
+
+    # Avisos (banner) y barra de progreso
+    for name, bg, fg in (("Warn", "#FFF4D6", "#6B4300"), ("Error", "#FDECEC", "#8E1B1B"),
+                         ("Info", C["primary_soft"], C["primary"])):
+        st.configure(f"{name}.TFrame", background=bg)
+        st.configure(f"{name}.TLabel", background=bg, foreground=fg, font=F_BASE)
+        st.configure(f"{name}Bold.TLabel", background=bg, foreground=fg, font=F_BOLD)
+    st.configure("Horizontal.TProgressbar", background=C["primary"], troughcolor=C["primary_soft"],
+                 bordercolor=C["surface"], lightcolor=C["primary"], darkcolor=C["primary"])
 
     for orient in ("Vertical", "Horizontal"):
         st.configure(f"{orient}.TScrollbar", background="#C3CCDF", troughcolor=C["surface"],

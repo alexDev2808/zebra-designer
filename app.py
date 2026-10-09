@@ -6,13 +6,16 @@ from __future__ import annotations
 
 import ctypes
 import json
+import queue
 import threading
 import tkinter as tk
+import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageDraw, ImageTk
 
+import diagnostics
 import excel_data
 import preview
 import printing
@@ -77,10 +80,30 @@ class App(tk.Tk):
         self._boxes: list[tuple[int, int, int, int]] = []
         self._handles: dict[str, tuple[int, int]] = {}
         self._photo = None
+        self._ready = False
+        self._diag_token = 0
+        self._diag_job = None
+        self._diag_win = None
+        self.diag_checks: list[diagnostics.Check] | None = None
 
+        self._ui_queue: queue.Queue = queue.Queue()
         self._build_ui()
+        self._poll_ui()
         self._restore_session()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _call_ui(self, fn):
+        """Agenda `fn` en el hilo de la interfaz (seguro desde hilos de fondo)."""
+        self._ui_queue.put(fn)
+
+    def _poll_ui(self):
+        while True:
+            try:
+                fn = self._ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            fn()
+        self.after(50, self._poll_ui)
 
     def _set_icon(self):
         img = Image.new("RGBA", (32, 32), C["primary"])
@@ -102,8 +125,10 @@ class App(tk.Tk):
         self._build_toolbar()
         self._build_statusbar()
 
+        self._build_banner()
         main = ttk.PanedWindow(self, orient="horizontal")
         main.pack(fill="both", expand=True, padx=10, pady=(10, 8))
+        self.main_pane = main
 
         left = ttk.Frame(main, style="Card.TFrame", width=int(450 * self.f))
         left.pack_propagate(False)
@@ -132,6 +157,8 @@ class App(tk.Tk):
 
         self.v_badge = tk.StringVar(value="300 dpi")
         ttk.Label(h, textvariable=self.v_badge, style="Badge.TLabel").pack(side="right", padx=(10, 0))
+        ttk.Button(h, text="Comprobar", style="Header.TButton",
+                   command=lambda: self.run_diagnostics(show_window=True)).pack(side="right", padx=(6, 0))
         ttk.Button(h, text="↻", style="Header.TButton", width=3,
                    command=self._refresh_printers).pack(side="right", padx=(6, 0))
         self.v_dest = tk.StringVar()
@@ -176,6 +203,19 @@ class App(tk.Tk):
                    command=lambda: self.print_rows("all")).pack(side="left", padx=(0, 6))
         ttk.Button(acts, text="Imprimir seleccionados", style="Accent.TButton",
                    command=lambda: self.print_rows("sel")).pack(side="left")
+
+    def _build_banner(self):
+        """Aviso bajo la barra de herramientas cuando la comprobación detecta problemas."""
+        self.banner = ttk.Frame(self, style="Warn.TFrame", padding=(16, 7))
+        self.banner_icon = ttk.Label(self.banner, style="WarnBold.TLabel")
+        self.banner_icon.pack(side="left", padx=(0, 8))
+        self.banner_msg = ttk.Label(self.banner, style="Warn.TLabel")
+        self.banner_msg.pack(side="left")
+        ttk.Button(self.banner, text="✕", style="Icon.TButton",
+                   command=lambda: self.banner.pack_forget()).pack(side="right")
+        ttk.Button(self.banner, text="Ver detalles", command=self.show_diagnostics).pack(side="right", padx=6)
+        self.banner_install = ttk.Button(self.banner, text="Instalar driver", style="Accent.TButton",
+                                         command=self.install_driver)
 
     def _build_statusbar(self):
         sb = ttk.Frame(self, style="Status.TFrame")
@@ -403,8 +443,14 @@ class App(tk.Tk):
         self._row(f, 5, "Puerto", ttk.Entry(f, textvariable=self.v_port, width=8))
 
         self._section(f, 6, "Herramientas")
-        ttk.Button(f, text="Imprimir prueba (registro actual, 1 copia)", style="Primary.TButton",
-                   command=self.print_test).grid(row=7, column=0, columnspan=3, sticky="ew")
+        tools = ttk.Frame(f, style="Card.TFrame")
+        tools.grid(row=7, column=0, columnspan=3, sticky="ew")
+        tools.columnconfigure((0, 1), weight=1, uniform="t")
+        ttk.Button(tools, text="Comprobar impresora y drivers", style="Accent.TButton",
+                   command=lambda: self.run_diagnostics(show_window=True)).grid(row=0, column=0, sticky="ew",
+                                                                                 padx=(0, 3))
+        ttk.Button(tools, text="Imprimir prueba", style="Primary.TButton",
+                   command=self.print_test).grid(row=0, column=1, sticky="ew", padx=(3, 0))
         ttk.Button(f, text="Calibrar sensor de etiqueta (~JC)",
                    command=lambda: self._send("~JC\n", "Calibración enviada.")).grid(
             row=8, column=0, columnspan=3, sticky="ew", pady=(6, 0))
@@ -437,6 +483,10 @@ class App(tk.Tk):
         else:
             self.v_dest.set(self.v_printer.get())
         self._update_summary()
+        if self._ready:  # comprobación rápida (sin escanear USB) al cambiar de impresora
+            if self._diag_job:
+                self.after_cancel(self._diag_job)
+            self._diag_job = self.after(700, lambda: self.run_diagnostics(scan_usb=False))
 
     def _on_dest_select(self):
         dest = self.v_dest.get()
@@ -1062,11 +1112,186 @@ class App(tk.Tk):
                     printing.send_tcp(ip, int(port or 9100), raw)
                 else:
                     printing.send_windows(printer, raw)
-                self.after(0, lambda: self.status.set("✔ " + ok_msg))
+                self._call_ui(lambda: self.status.set("✔ " + ok_msg))
             except Exception as exc:
                 err = str(exc)
-                self.after(0, lambda: (self.status.set("Error al imprimir."),
+                self._call_ui(lambda: (self.status.set("Error al imprimir."),
                                        messagebox.showerror(APP_TITLE, f"Error al imprimir:\n{err}")))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    # ========================================================= comprobación
+    def run_diagnostics(self, scan_usb: bool = True, show_window: bool = False):
+        """Comprueba impresora y drivers en segundo plano; actualiza el aviso y la ventana."""
+        self._diag_job = None
+        self._diag_token += 1
+        token = self._diag_token
+        args = (self.v_mode.get(), self.v_printer.get(), self.v_ip.get().strip(),
+                self.v_port.get().strip() or 9100)
+        if show_window:
+            self.diag_checks = None
+            self.show_diagnostics()
+
+        def work():
+            try:
+                checks = diagnostics.run(*args, scan_usb=scan_usb)
+            except Exception as exc:
+                checks = [diagnostics.Check(diagnostics.ERROR, "No se pudo completar la comprobación", str(exc))]
+            self._call_ui(lambda: self._on_diagnostics(token, checks))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_diagnostics(self, token: int, checks: list):
+        if token != self._diag_token:  # llegó una comprobación más reciente
+            return
+        self.diag_checks = checks
+        self._update_banner()
+        if self._diag_win is not None and self._diag_win.winfo_exists():
+            self._fill_diagnostics()
+
+    def _update_banner(self):
+        checks = self.diag_checks or []
+        problems = sorted((c for c in checks if c.level in (diagnostics.WARN, diagnostics.ERROR)),
+                          key=lambda c: -diagnostics.SEVERITY[c.level])
+        if not problems:
+            self.banner.pack_forget()
+            if checks:
+                self.status.set("✔ Comprobación de impresora sin problemas.")
+            return
+        kind = "Error" if problems[0].level == diagnostics.ERROR else "Warn"
+        self.banner.configure(style=f"{kind}.TFrame")
+        self.banner_icon.configure(style=f"{kind}Bold.TLabel", text=theme.LEVEL_ICON[problems[0].level])
+        more = f"   (+{len(problems) - 1} aviso(s) más)" if len(problems) > 1 else ""
+        self.banner_msg.configure(style=f"{kind}.TLabel", text=problems[0].title + more)
+        if any(c.needs_driver for c in checks):
+            self.banner_install.pack(side="right", padx=(0, 6))
+        else:
+            self.banner_install.pack_forget()
+        self.banner.pack(fill="x", before=self.main_pane)
+
+    def show_diagnostics(self):
+        if self._diag_win is not None and self._diag_win.winfo_exists():
+            self._diag_win.lift()
+            self._fill_diagnostics()
+            return
+        f = self.f
+        win = self._diag_win = tk.Toplevel(self)
+        win.title("Comprobación de impresora y drivers")
+        win.geometry(f"{int(760 * f)}x{int(540 * f)}")
+        win.configure(bg=C["surface"])
+        win.transient(self)
+        head = ttk.Frame(win, style="Card.TFrame", padding=(18, 14, 18, 6))
+        head.pack(fill="x")
+        ttk.Label(head, text="Comprobación de impresora y drivers", style="Section.TLabel").pack(anchor="w")
+        self._diag_dest = ttk.Label(head, style="Muted.TLabel")
+        self._diag_dest.pack(anchor="w", pady=(2, 0))
+        ttk.Separator(win).pack(fill="x", padx=18, pady=(6, 0))
+        foot = ttk.Frame(win, style="Card.TFrame", padding=(18, 10, 18, 16))
+        foot.pack(fill="x", side="bottom")
+        self._diag_body = ttk.Frame(win, style="Card.TFrame", padding=(18, 10))
+        self._diag_body.pack(fill="both", expand=True)
+        self._diag_driver = ttk.Label(foot, style="Value.TLabel")
+        self._diag_driver.pack(fill="x", pady=(0, 10))
+        ttk.Button(foot, text="Cerrar", command=win.destroy).pack(side="right")
+        ttk.Button(foot, text="Página oficial de Zebra",
+                   command=lambda: webbrowser.open(diagnostics.load_config()["pagina_oficial"])
+                   ).pack(side="right", padx=6)
+        self._diag_install = ttk.Button(foot, text="Instalar driver", command=self.install_driver)
+        self._diag_install.pack(side="right")
+        ttk.Button(foot, text="Volver a comprobar", style="Primary.TButton",
+                   command=lambda: self.run_diagnostics(show_window=True)).pack(side="left")
+        self._fill_diagnostics()
+
+    def _fill_diagnostics(self):
+        body = self._diag_body
+        for w in body.winfo_children():
+            w.destroy()
+        prefix = "Impresora: " if self.v_mode.get() == "windows" else "Red: "
+        self._diag_dest.configure(text=prefix + self._destination()
+                                  + "   ·   también se buscan impresoras Zebra conectadas por USB")
+        cfg = diagnostics.load_config()
+        src = cfg["installer"].strip()
+        self._diag_driver.configure(text=f"Driver recomendado: ZDesigner {cfg['version']}   ·   Instalador: "
+                                         + (src or "no configurado (se abrirá la página de Zebra)"))
+        checks = self.diag_checks
+        needs = bool(checks) and any(c.needs_driver for c in checks)
+        self._diag_install.configure(text=f"Instalar driver {cfg['version']}",
+                                     style="Accent.TButton" if needs else "TButton")
+        if checks is None:
+            ttk.Label(body, text="Comprobando…", style="Muted.TLabel").pack(anchor="w")
+            return
+        body.columnconfigure(1, weight=1)
+        for r, c in enumerate(checks):
+            ttk.Label(body, text=theme.LEVEL_ICON[c.level], style="Card.TLabel", foreground=C[c.level],
+                      font=(theme.FONT, 13, "bold")).grid(row=2 * r, column=0, rowspan=2, sticky="n",
+                                                          padx=(0, 12), pady=(6, 0))
+            ttk.Label(body, text=c.title, style="Card.TLabel", font=theme.F_BOLD).grid(
+                row=2 * r, column=1, sticky="w", pady=(8, 0))
+            if c.detail:
+                ttk.Label(body, text=c.detail, style="Muted.TLabel", wraplength=int(640 * self.f),
+                          justify="left").grid(row=2 * r + 1, column=1, sticky="w")
+
+    def install_driver(self):
+        cfg = diagnostics.load_config()
+        version, src = cfg["version"], cfg["installer"].strip()
+        if not src:
+            if messagebox.askokcancel(APP_TITLE, (
+                    f"Se necesita el driver ZDesigner {version} de Zebra.\n\n"
+                    "Zebra solicita aceptar su licencia en su sitio web antes de descargar, por eso se "
+                    "abrirá la página oficial de la ZT411:\n\n"
+                    "  1. Pestaña «Downloads» › «Drivers».\n"
+                    f"  2. Descargue «ZDesigner Windows Printer Driver» versión {version}.\n"
+                    "  3. Ejecute el instalador y siga el asistente.\n\n"
+                    "Para que este programa lo instale automáticamente, TI puede indicar la ruta del "
+                    "instalador (carpeta compartida o URL interna) en driver.json.")):
+                webbrowser.open(cfg["pagina_oficial"])
+            return
+        if not messagebox.askyesno(APP_TITLE, f"Se instalará el driver ZDesigner {version} desde:\n{src}\n\n"
+                                              "Windows pedirá permisos de administrador. ¿Continuar?"):
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title("Instalando driver")
+        dlg.configure(bg=C["surface"])
+        dlg.transient(self)
+        dlg.resizable(False, False)
+        box = ttk.Frame(dlg, style="Card.TFrame", padding=20)
+        box.pack(fill="both", expand=True)
+        msg = ttk.Label(box, text="Obteniendo el instalador…", style="Card.TLabel")
+        msg.pack(anchor="w")
+        bar = ttk.Progressbar(box, length=int(380 * self.f), mode="determinate", maximum=100)
+        bar.pack(fill="x", pady=(10, 0))
+
+        def progress(done, total):
+            def ui():
+                if total:
+                    bar.configure(value=100 * done / total)
+                    msg.configure(text=f"Descargando… {done / 1e6:.1f} de {total / 1e6:.1f} MB")
+            self._call_ui(ui)
+
+        def running():
+            bar.configure(mode="indeterminate")
+            bar.start(12)
+            msg.configure(text="Ejecutando el instalador de Zebra…")
+
+        def finish(ok: bool, text: str):
+            dlg.destroy()
+            (messagebox.showinfo if ok else messagebox.showerror)(APP_TITLE, text)
+            self._refresh_printers()
+            self.run_diagnostics(show_window=True)
+
+        def work():
+            try:
+                path = diagnostics.obtain_installer(cfg, progress)
+                self._call_ui(running)
+                code = diagnostics.run_installer(path)
+                ok = code == 0
+                text = ("Instalación del driver terminada." if ok else
+                        f"El instalador terminó con código {code}. Revise si se completó correctamente.")
+                self._call_ui(lambda: finish(ok, text))
+            except Exception as exc:
+                err = str(exc)
+                self._call_ui(lambda: finish(False, f"No se pudo instalar el driver:\n{err}"))
 
         threading.Thread(target=work, daemon=True).start()
 
@@ -1117,6 +1342,8 @@ class App(tk.Tk):
         if s.get("excel") and Path(s["excel"]).exists():
             self._open_excel(s["excel"], s.get("sheet"))
         self.after(150, self._initial_layout)
+        self._ready = True
+        self.after(800, self.run_diagnostics)
 
     def _initial_layout(self):
         self.update_idletasks()
