@@ -17,6 +17,7 @@ echo Instalando dependencias...
 echo Generando ejecutable...
 .venv\Scripts\pyinstaller.exe --noconfirm --clean --windowed ^
     --name EtiquetasZebra --icon assets\icono.ico app.py || goto :error
+copy /y driver.json dist\EtiquetasZebra\ >nul || goto :error
 echo.
 echo Ejecutable listo: dist\EtiquetasZebra\EtiquetasZebra.exe
 

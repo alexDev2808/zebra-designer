@@ -36,6 +36,7 @@ Source: "dist\EtiquetasZebra\*"; DestDir: "{app}"; Flags: ignoreversion recurses
 Source: "ejemplo.xlsx"; DestDir: "{app}\Ejemplos"; Flags: ignoreversion
 Source: "plantilla_ejemplo.json"; DestDir: "{app}\Ejemplos"; Flags: ignoreversion
 Source: "docs\MANUAL_DE_USO.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "driver.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
