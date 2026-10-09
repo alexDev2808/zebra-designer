@@ -13,7 +13,8 @@ Guía paso a paso para diseñar e imprimir etiquetas en Zebra ZT411 (300 / 600 d
 7. [Seleccionar la impresora](#7-seleccionar-la-impresora)
 8. [Imprimir](#8-imprimir)
 9. [Plantillas](#9-plantillas)
-10. [Solución de problemas](#10-solución-de-problemas)
+10. [Comprobación de impresora y drivers](#10-comprobación-de-impresora-y-drivers)
+11. [Solución de problemas](#11-solución-de-problemas)
 
 ---
 
@@ -179,11 +180,50 @@ Una plantilla guarda el tamaño, la configuración y los elementos de la etiquet
 La misma plantilla sirve para las ZT411 de 300 y de 600 dpi. Al cerrar, el programa recuerda
 la última plantilla, Excel, hoja e impresora.
 
-## 10. Solución de problemas
+## 10. Comprobación de impresora y drivers
+
+**¿Hace falta instalar un driver?**
+
+- Impresión **por red (IP)**: no.
+- Impresión **por USB o por una impresora de Windows**: sí, el driver **ZDesigner** de Zebra.
+
+El programa lo revisa solo al abrir y cada vez que cambia de impresora. Si encuentra algo,
+muestra un aviso amarillo (advertencia) o rojo (error) bajo la barra de herramientas.
+Pulse **Ver detalles**, o **Comprobar** en el encabezado, para ver la lista completa:
+
+| Símbolo | Significado |
+|---|---|
+| ✔ verde | Correcto |
+| ℹ azul | Información (p. ej. existe una versión más reciente del driver) |
+| ⚠ ámbar | Advertencia: puede imprimir, pero conviene corregirlo |
+| ✖ rojo | Error: la impresión probablemente fallará |
+
+Qué se revisa:
+
+- Que la impresora exista en Windows y qué driver y versión usa.
+- Si Windows la tiene **sin conexión**, en pausa o con error.
+- Para impresoras en red: si responde y su estado real (**sin papel**, **en pausa**,
+  **cabezal abierto**, **sin ribbon**).
+- Si hay una **Zebra conectada por USB sin driver**.
+
+**Instalar el driver:** cuando hace falta aparece el botón **Instalar driver**.
+
+- Si TI configuró el instalador en `driver.json`, el programa lo descarga, comprueba que sea el
+  archivo correcto y lo ejecuta. Windows pedirá permiso de administrador.
+- Si no está configurado, se abre la página oficial de Zebra con las instrucciones y la
+  **versión exacta** que debe descargar.
+
+> Si la impresora es **compartida desde un servidor** (su nombre empieza con `\`), el driver
+> se actualiza en ese servidor; avise a TI.
+
+## 11. Solución de problemas
 
 | Problema | Solución |
 |---|---|
-| No imprime nada | Verifique que la impresora esté en línea y que el driver sea **ZDesigner** (ZPL). Pruebe **Imprimir prueba**. |
+| No imprime nada | Pulse **Comprobar** en el encabezado y siga las indicaciones. Pruebe **Imprimir prueba**. |
+| «Windows marca la impresora sin conexión» | Encienda la impresora y revise el cable USB; en Windows, desmarque *Usar impresora sin conexión*. |
+| «Zebra USB sin driver» | Pulse **Instalar driver**. |
+| «Driver ZDesigner antiguo» | Actualice a la versión indicada (en el servidor, si la cola es compartida). |
 | Imprime texto con códigos `^XA…` | El driver no es ZPL; reinstale con ZDesigner o use la conexión por red (IP). |
 | La etiqueta sale cortada o corrida | Revise ancho/alto, calibre el sensor (~JC) y use *Desplaz. X / Y*. |
 | Sale a la mitad o al doble de tamaño | La resolución no corresponde a la impresora: elija 300 o 600 dpi correctamente. |

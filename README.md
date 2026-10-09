@@ -19,13 +19,57 @@ impresoras **Zebra ZT411 de 300 y 600 dpi**, tomando los datos desde un archivo 
 - **Impresión** por la cola de Windows (RAW, driver ZDesigner) o directa por red (TCP 9100).
 - Herramientas: imprimir prueba, calibrar sensor (`~JC`), imprimir configuración (`~WC`),
   ver y exportar el ZPL generado.
+- **Comprobación automática de impresora y drivers** al abrir y al cambiar de impresora,
+  con instalación guiada del driver ZDesigner (ver abajo).
 - Plantillas en `.json` reutilizables; recuerda el último Excel, plantilla e impresora.
 
 ## Requisitos
 
 - Windows 10/11
 - Python 3.10 o superior ([python.org](https://www.python.org/downloads/), marque *Add Python to PATH*)
-- Impresora Zebra ZT411 instalada con el driver **ZDesigner**, o accesible por red
+- Impresora Zebra ZT411:
+  - **por red (IP, puerto 9100)**: no requiere driver;
+  - **por USB o cola de Windows**: requiere el driver **ZDesigner** (recomendado 10.6.26.28275).
+
+## Comprobación de impresora y drivers
+
+Al abrir el programa (y al cambiar de impresora) se revisa en segundo plano:
+
+| Revisión | Detecta |
+|---|---|
+| Cola de Windows | Que exista, qué driver usa y su versión (avisa si el ZDesigner es antiguo o si la impresora no es Zebra) |
+| Estado en Windows | Cola sin conexión, en pausa, sin papel, error |
+| Estado real por red | Si la cola usa un puerto IP (o se imprime por IP): conexión al 9100 y consulta `~HS` — sin papel, pausa, cabezal abierto, sin ribbon |
+| USB | Impresoras Zebra conectadas (VID `0A5F`) que no tienen driver instalado |
+
+Si hay problemas aparece un aviso bajo la barra de herramientas; **Comprobar** (encabezado)
+abre el detalle. A las impresoras que no son Zebra nunca se les envían comandos.
+
+### Instalación del driver (`driver.json`)
+
+Zebra solicita aceptar su licencia en su sitio web, así que no existe un enlace público fijo
+para descargar el driver. La versión exacta y el origen del instalador se configuran en
+`driver.json` (junto al ejecutable):
+
+```json
+{
+  "version": "10.6.26.28275",
+  "installer": "\\\\BANCOR\\Drivers\\Zebra\\zd1062628275-certified.exe",
+  "sha256": "huella SHA-256 del instalador",
+  "pagina_oficial": "https://www.zebra.com/us/en/support-downloads/printers/industrial/zt411.html"
+}
+```
+
+- **`installer` configurado** (ruta compartida, ruta local o URL `https` interna): el botón
+  **Instalar driver** lo copia/descarga, verifica la huella **SHA-256** (si no coincide, lo
+  descarta) y lo ejecuta con permisos de administrador. Al terminar vuelve a comprobar.
+- **`installer` vacío**: se abre la página oficial de la ZT411 indicando la versión exacta a
+  descargar.
+
+Para obtener la huella del instalador: `Get-FileHash .\zd1062628275-certified.exe -Algorithm SHA256`.
+
+Las colas **compartidas desde un servidor** (p. ej. `\\BANCOR\...`) toman el driver del
+servidor: el programa avisa si está desactualizado, pero la actualización se hace en el servidor.
 
 Dependencias (se instalan solas con `run.bat`): `openpyxl`, `Pillow`, `python-barcode`,
 `qrcode`, `pywin32`.
@@ -69,6 +113,8 @@ Para probar de inmediato: abra `ejemplo.xlsx` y la plantilla `plantilla_ejemplo.
 | `printing.py` | Envío del ZPL: cola de Windows en modo RAW o socket TCP 9100 |
 | `excel_data.py` | Lectura de hojas de Excel respetando formatos numéricos y fechas |
 | `theme.py` | Paleta de colores (azul rey / dorado) y estilos ttk |
+| `diagnostics.py` | Comprobación de impresoras y drivers; obtención e instalación del driver |
+| `driver.json` | Versión recomendada del driver ZDesigner y origen del instalador |
 | `run.bat` | Lanzador: crea el entorno, instala dependencias y abre la app |
 | `build.bat`, `installer.iss` | Generación del `.exe` (PyInstaller) y del instalador (Inno Setup) |
 | `assets/icono.ico` | Icono de la aplicación |
