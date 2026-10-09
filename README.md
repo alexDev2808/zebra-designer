@@ -70,16 +70,31 @@ Para probar de inmediato: abra `ejemplo.xlsx` y la plantilla `plantilla_ejemplo.
 | `excel_data.py` | Lectura de hojas de Excel respetando formatos numéricos y fechas |
 | `theme.py` | Paleta de colores (azul rey / dorado) y estilos ttk |
 | `run.bat` | Lanzador: crea el entorno, instala dependencias y abre la app |
+| `build.bat`, `installer.iss` | Generación del `.exe` (PyInstaller) y del instalador (Inno Setup) |
+| `assets/icono.ico` | Icono de la aplicación |
 | `ejemplo.xlsx`, `plantilla_ejemplo.json` | Datos y plantilla de ejemplo |
 
-## Generar un ejecutable (.exe)
+## Generar el ejecutable y el instalador
+
+Doble clic en **`build.bat`**. El script:
+
+1. Instala PyInstaller en `.venv` y genera **`dist\EtiquetasZebra\EtiquetasZebra.exe`**.
+   Esa carpeta completa es una versión portable: puede copiarse a otro equipo con Windows
+   sin instalar Python.
+2. Si [Inno Setup 6](https://jrsoftware.org/isinfo.php) está instalado, genera además el
+   instalador **`dist\EtiquetasZebra-Setup-1.0.0.exe`**, con asistente en español,
+   accesos directos, archivos de ejemplo y desinstalador.
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install pyinstaller
-.\.venv\Scripts\pyinstaller.exe --noconsole --onefile --name EtiquetasZebra app.py
+winget install JRSoftware.InnoSetup   # solo una vez, para el instalador
 ```
 
-El ejecutable queda en `dist\EtiquetasZebra.exe`.
+La versión del instalador se cambia en `installer.iss` (`#define AppVersion`).
+
+> **¿Necesita un .msi?** Solo hace falta si se va a distribuir por GPO o Intune. Se puede
+> generar con WiX Toolset a partir de la misma carpeta `dist\EtiquetasZebra`. Para
+> instalaciones normales, el instalador de Inno Setup es suficiente y admite modo silencioso
+> (`EtiquetasZebra-Setup-1.0.0.exe /VERYSILENT`).
 
 ## Autor
 
